@@ -32,7 +32,10 @@ inheritance. Same standard data, new lens.
 - SharePoint Framework (SPFx) 1.22, web part, React 17, TypeScript (strict). SPFx 1.22 uses the
   Heft build toolchain (gulp was removed; webpack still underneath).
 - [PnPjs](https://pnp.github.io/pnpjs/) 4.x for SharePoint REST (delegated SPFx context).
-- [KendoReact](https://www.telerik.com/kendo-react-ui) for the UI (TreeList, Dialog, Switch).
+- [KendoReact](https://www.telerik.com/kendo-react-ui) for the **TreeList only** (pinned to the
+  13.x line - the last KendoReact major that supports React 17).
+- [Fluent UI](https://developer.microsoft.com/fluentui) (`@fluentui/react`, shipped by SPFx) for
+  everything else - dialog, toggle, buttons, icons - so the chrome matches the SharePoint look.
 - No Microsoft Graph: all data comes from SPO REST via PnPjs on the current user's context.
 
 ## Design notes and honest limitations

@@ -3,7 +3,7 @@
 This reproduces the whole web part using only publicly available components. Every tool here
 is public; KendoReact additionally needs your own license key (a free 30-day trial works).
 
-Target stack: SPFx 1.22, React 17, TypeScript strict, PnPjs 4.x, KendoReact.
+Target stack: SPFx 1.22+ (Heft toolchain), React 17, TypeScript strict, PnPjs 4.x, KendoReact.
 
 > Two paths: the manual path below (no AI), or the fast path - point Claude Code at the
 > blueprint (`CONTEXT.md`) and let it scaffold. The manual path is the reference.
@@ -22,6 +22,32 @@ as a local dependency in the scaffolded project):
 ```bash
 npm install -g yo @microsoft/generator-sharepoint
 ```
+
+### Reference environment (known-good baseline)
+
+The exact global toolchain the repo was built and tested on (Windows, PowerShell). You do NOT
+need identical versions - Node 22 plus an SPFx 1.22-or-later generator is what matters - but this
+is a known-good snapshot to fall back on if something misbehaves:
+
+```text
+Node   v22.22.0     (managed via fnm: `fnm use 22`)
+npm    11.16.0
+
+# global npm packages (npm ls -g --depth=0)
+@microsoft/generator-sharepoint  1.23.1    # essential - SPFx generator (1.22+ = Heft)
+yo                               7.0.1     # essential - runs the generator
+@rushstack/heft                  1.2.17    # build orchestrator (also a per-project local dep)
+@anthropic-ai/claude-code        2.1.168   # only for the AI / blueprint path
+@pnp/cli-microsoft365            11.8.0    # optional - m365 CLI (app-catalog deploy, admin)
+corepack                         0.35.0    # optional
+npm-check-updates                22.2.3    # optional - dependency bumps
+rimraf                           6.1.3     # optional - cross-platform clean
+```
+
+Note on the generator: 1.23.1 above is newer than the 1.22 this guide names. Both are
+Heft-based and the steps are identical - the generator version is NOT the pin that matters.
+After scaffolding, read `app/package.json` and confirm the **React** version; KendoReact must
+match it (step 3).
 
 ---
 
@@ -43,9 +69,19 @@ yo @microsoft/sharepoint --skip-install \
 ```
 
 If the command stalls, it is waiting on an unflagged prompt (e.g. tenant-wide deploy) - answer
-it; do not leave it hanging. When it finishes, open `app/package.json` and note the actual SPFx
-and React versions. The **React** version is the one that matters: KendoReact must match it
-(step 3). SPFx 1.22 scaffolds a Heft project (no gulp).
+it; do not leave it hanging. The generator nests the solution under `app/site-structure-explorer/`;
+flatten it so the solution root is `app/` itself:
+
+```bash
+# from inside app/
+Move-Item .\site-structure-explorer\* . -Force   # PowerShell; or mv on bash
+Remove-Item .\site-structure-explorer
+```
+
+Then open `app/package.json` and note the actual SPFx and React versions. The **React** version
+is the one that matters: KendoReact must match it (step 3). With generator 1.23.1 this is
+**React 17.0.1**, so the KendoReact 13.x pin in step 3 applies. SPFx 1.22+ scaffolds a Heft
+project (no gulp).
 
 ---
 
@@ -79,18 +115,30 @@ protected onInit(): Promise<void> {
 
 ---
 
-## 3. Add KendoReact + theme + license
+## 3. Add KendoReact (TreeList) + Fluent UI for the rest
 
-```bash
-npm install \
-  @progress/kendo-react-treelist \
-  @progress/kendo-react-dialog \
-  @progress/kendo-react-inputs \
-  @progress/kendo-react-buttons \
-  @progress/kendo-react-common \
-  @progress/kendo-data-query \
-  @progress/kendo-licensing \
-  @progress/kendo-theme-default
+UI library policy: prefer Fluent UI wherever Fluent and KendoReact both have a similar-looking
+component. Use KendoReact **only for the TreeList** (Fluent has no equivalent); use Fluent UI
+(`@fluentui/react`, already shipped by SPFx) for Dialog/Panel, Switch (Fluent `Toggle`), Buttons,
+Spinner, badges, and all authored icons. **Keep `@fluentui/react` - do not remove it.**
+
+Pin the KendoReact pieces to the React-17 line (13.x; v14+ requires React 18/19). Verified,
+install-clean for React 17.0.1 - note `kendo-svg-icons` must be `^4` (Kendo 13's peer; `^5`
+fails install). You do NOT need `kendo-react-dialogs` / `-inputs` / `-buttons` (those are Fluent):
+
+```jsonc
+// dependencies (in package.json) - add to the generated project, then install once in step 4
+"@pnp/sp": "4.20.0",
+"@pnp/core": "4.20.0",
+"@pnp/queryable": "4.20.0",
+"@pnp/logging": "4.20.0",
+"@progress/kendo-react-treelist": "13.3.0",
+"@progress/kendo-react-common": "13.3.0",
+"@progress/kendo-react-intl": "13.3.0",
+"@progress/kendo-data-query": "^1.7.4",
+"@progress/kendo-licensing": "^1.11.2",
+"@progress/kendo-svg-icons": "^4.9.2",
+"@progress/kendo-theme-default": "^14.1.0"
 ```
 
 Activate your license (do NOT commit the key). The current flow: place your license file in
@@ -103,10 +151,9 @@ Import the theme once (e.g. at the top of the web part or root component):
 import "@progress/kendo-theme-default/dist/all.css";
 ```
 
-Gotchas: SPFx ships its own React (17 for 1.22) - do not add a second React. Install a
-KendoReact version whose `peerDependencies` include that React (do not assume the latest Kendo
-supports React 17). If the theme CSS does not load, confirm SPFx is bundling the imported
-`.css` (import it from a `.ts/.tsx`, not only SCSS).
+Gotchas: SPFx ships its own React (17 for 1.22) - do not add a second React. If React is not 17,
+the v13 pin above is wrong - re-check the KendoReact peer range first. If the theme CSS does not
+load, confirm SPFx is bundling the imported `.css` (import it from a `.ts/.tsx`, not only SCSS).
 
 ### Single-copy tsconfig, then install once and build the empty shell
 
@@ -274,7 +321,7 @@ inline state, never a blank component.
 - Columns: Title (custom cell with a kind icon), Item count (numeric, sortable),
   Hidden (boolean badge), System (boolean badge), Unique permissions (boolean badge),
   Template (friendly label from a small BaseTemplate map; folders show "-").
-- Toolbar: a KendoReact `Switch` "Show hidden and system". Prefer one full fetch held in
+- Toolbar: a Fluent UI `Toggle` "Show hidden and system". Prefer one full fetch held in
   component state + client-side filter, so toggling does not refetch.
 
 ```tsx
@@ -310,7 +357,7 @@ Never pre-walk the whole site - fetch children only when a node is expanded.
 
 ## 8. Permission detail dialog
 
-- On row click / clicking the unique-permissions badge, open a KendoReact `Dialog`.
+- On row click / clicking the unique-permissions badge, open a Fluent UI `Dialog` (or `Panel`).
 - On open, call `service.getPermissions(node)`; show a spinner, then the principal/role table.
 - Render a short note: results reflect only what the current user is allowed to see.
 

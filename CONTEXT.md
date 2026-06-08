@@ -67,18 +67,28 @@ In scope (stretch, demo only if stable; otherwise pre-recorded):
   with KendoReact (below), STOP and surface the conflict to the user - never force a React
   mismatch across the build.
 - Data: PnPjs 4.x, selective imports only.
-- UI: KendoReact (licensed). Packages: `@progress/kendo-react-treelist`,
-  `@progress/kendo-react-dialog`, `@progress/kendo-react-inputs` (Switch),
-  `@progress/kendo-react-indicators` or `@progress/kendo-react-common` for badges as needed,
-  plus a theme package, e.g. `@progress/kendo-theme-default`. Use one theme consistently.
-- KendoReact MUST match React: install a KendoReact version whose `peerDependencies` include the
-  project's ACTUAL React version. Check the peer range BEFORE `npm install`; do not assume the
-  latest KendoReact supports React 17. If no compatible Kendo line exists for the emitted React,
-  stop and ask (per VERSION DRIFT).
+- UI library policy: prefer **Fluent UI** for any element where Fluent and KendoReact both offer
+  a visually similar option. Use **KendoReact only for the TreeList** (Fluent has no equivalent).
+  - KendoReact (TreeList only): `@progress/kendo-react-treelist` plus its peers
+    `@progress/kendo-react-common`, `@progress/kendo-react-intl`, `@progress/kendo-data-query`,
+    `@progress/kendo-svg-icons` (`^4`, used internally by the TreeList), `@progress/kendo-licensing`,
+    and a theme (`@progress/kendo-theme-default`).
+  - Fluent UI (everything else): Dialog/Panel, Switch -> Fluent `Toggle`, Buttons, Spinner,
+    badges, and all authored icons. Use `@fluentui/react` (SPFx ships it) - do NOT remove it.
+  - Drop the Kendo packages you no longer import (`kendo-react-dialogs`, `-inputs`, `-buttons`).
+    Keep `kendo-svg-icons` (transitive peer of the TreeList) even though your own icons are Fluent.
+- KendoReact MUST match React. Check the peer range BEFORE `npm install`. KNOWN-GOOD for React
+  17 (verified): generator 1.23.1 emits **React 17.0.1**, and **KendoReact 13.x (13.3.0)** is the
+  last line that lists React 17 in its peers - v14+ dropped to React 18/19 only. So for React 17,
+  pin the KendoReact components to `13.3.0` and do NOT probe npm. Companion pins that install
+  cleanly with Kendo 13: `@progress/kendo-svg-icons@^4.9.2` (Kendo 13's peer wants `^4`; `^5`
+  fails install), `@progress/kendo-data-query@^1.7.4`, `@progress/kendo-licensing@^1.11.2`,
+  `@progress/kendo-theme-default@^14.1.0`, and PnPjs `4.20.0`. If React is NOT 17, the v13 pin is
+  wrong - re-check the peer range and stop if nothing fits (per VERSION DRIFT).
 - KendoReact license: commercial library; activate your own license (trial or paid) via
   `@progress/kendo-licensing` (license file or env var). Do NOT commit the key. See the README.
 - Keep utilities small and local; this demo has no external shared-library dependency.
-- Single-copy module resolution for `@pnp/*` + `@microsoft/*` is MANDATORY - see section 10.
+- Single-copy module resolution for `@pnp/*` is MANDATORY - see section 10.
 
 ## 5. Seed project (recommended starting point)
 
@@ -102,12 +112,12 @@ Do NOT seed from 3-Plant directly: it fetches data via Microsoft Graph (`@micros
 which this blueprint forbids (section 3). Seeding from it would mean ripping out Graph and
 re-adding PnPjs as step zero.
 
-UI library swap (applies regardless): both stages use Fluent UI. Replace Fluent UI with
-KendoReact for the new component (TreeList, Dialog, Switch). Do not keep both UI libraries in
-the new web part.
+UI libraries: both seed stages use Fluent UI. Keep Fluent UI for Dialog/Switch/Button/Spinner/
+icons, and add KendoReact ONLY for the TreeList (no Fluent equivalent). Both libraries coexist
+in this web part by design - see the UI library policy in section 4.
 
 Net path: copy `4-Tree/app` -> rename web part to `siteStructureExplorer` -> strip
-CRUD/lookup/cache down to read-only -> swap Fluent UI for KendoReact -> implement per the
+CRUD/lookup/cache down to read-only -> add a KendoReact TreeList (keep Fluent for the rest) -> implement per the
 sections below.
 
 ## 6. Architecture / layout
@@ -273,24 +283,34 @@ inline error state, never a blank component.
 
 ## 9. UI behavior (KendoReact TreeList)
 
+KendoReact v13 TreeList API (verified, so the agent does not have to rediscover it):
+- Flat `ISiteStructureNode[]` -> tree via `createDataTree` + `mapTree` (from
+  `@progress/kendo-react-treelist`); render with an explicit children field through
+  `subItemsField` + `expandField`, and one expandable column.
+- Lazy expand: seed an expanded node with a placeholder child, then replace it on
+  `onExpandChange` (`TreeListExpandChangeEvent`).
+- Sort/filter: controlled, via `@progress/kendo-data-query` (`SortDescriptor[]` from
+  `TreeListSortChangeEvent.sort`).
+- Icons: `SvgIcon` from `@progress/kendo-react-common`, icon glyphs from
+  `@progress/kendo-svg-icons` (e.g. `folderIcon`, `fileIcon`, `globeIcon`).
+
 - Bind flat `ISiteStructureNode[]` using TreeList self-referencing data (id / parentId).
-  Use the TreeList flat-data-to-tree helper; `subItemsField` virtualized via expand.
 - Columns:
-  - Title: custom cell with `KindIcon` (site/list/library/folder) + text.
+  - Title: custom cell with a Fluent UI icon (site/list/library/folder) + text.
   - Item count: numeric, right-aligned, sortable.
-  - Hidden: `BooleanBadge`.
-  - System: `BooleanBadge`.
-  - Unique permissions: `BooleanBadge`; clicking it (or selecting the row) opens
-    `PermissionDetailDialog` for that node.
+  - Hidden: Fluent badge.
+  - System: Fluent badge.
+  - Unique permissions: Fluent badge; clicking it (or selecting the row) opens the
+    permission dialog for that node.
   - Template: friendly label from BaseTemplate map (folders show "-").
-- Toolbar: KendoReact `Switch` "Show hidden and system" -> re-filters the dataset
+- Toolbar: Fluent UI `Toggle` "Show hidden and system" -> re-filters the dataset
   (re-run `getListsAndLibraries({ includeHiddenSystem })`, or filter client-side from a
   full fetch held in state; prefer a single full fetch + client filter to avoid refetch).
 - Expand: `onExpandChange` -> if node.kind is library/folder and not `loaded`, call
   `getChildFolders(node)`, append children to state, mark `loaded = true`.
-- Selection -> `PermissionDetailDialog`: calls `getPermissions(node)` on open; shows a
-  loading spinner, then the principal/role table, plus the visibility caveat note.
-- States: loading (skeleton or spinner), empty (no lists matched the filter), error (inline).
+- Selection -> permission dialog (Fluent `Dialog` or `Panel`): calls `getPermissions(node)` on
+  open; shows a Fluent `Spinner`, then the principal/role table, plus the visibility caveat note.
+- States: loading (Fluent Spinner), empty (no lists matched the filter), error (inline).
 
 ## 10. Build / config specifics
 
@@ -338,6 +358,22 @@ inline error state, never a blank component.
 - KendoReact license activation wired into the build (env/license file); never commit secrets.
 - Web part property: target site is the current site by default; optionally expose a
   "site URL" text property for pointing at another site in the same tenant (read-only access).
+- Known gotchas (observed in a real scaffold run; handle proactively, do not rediscover):
+  - The generator nests the solution under `app/<solution-name>/`. Flatten it so the solution
+    root is `app/` (move `app/<solution-name>/*` up one level), or run the generator where you
+    want the root and adjust.
+  - The generated `package.json` ships `@fluentui/react`; KEEP it - we use Fluent UI for
+    Dialog/Switch/Button/icons (UI library policy, section 4). Remove only the Kendo packages
+    you do not import (`kendo-react-dialogs`, `-inputs`, `-buttons`).
+  - The generated project already has an `overrides` block pinning `@rushstack/heft`, and a
+    `resolutions` block pinning `@types/react` (17.0.45). Add `@pnp/*` to the EXISTING overrides
+    block; do not create a second one or disturb those pins.
+  - ESLint `@rushstack/no-new-null` will flag `parentId: string | null` (section 7 contract).
+    Disable that one rule for the models with a comment explaining the TreeList-root null - do
+    NOT change the type.
+  - Do not declare an uninitialized class field like `private _sp: SPFI;` (strict
+    `TS2564`). Build the `spfi(...).using(SPFx(this.context))` instance inside `render()` (or
+    `onInit`) instead - never silence it with `!`.
 
 ## 11. Definition of done (acceptance criteria)
 
