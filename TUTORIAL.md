@@ -16,46 +16,45 @@ Target stack: SPFx 1.22, React 17, TypeScript strict, PnPjs 4.x, KendoReact.
 - A SharePoint Online tenant (hosted workbench for testing; App Catalog for deployment).
 - A KendoReact license (trial or paid): https://www.telerik.com/kendo-react-ui/components/my-license/
 
-Install the global toolchain:
+Install the global toolchain (SPFx 1.22 uses the Heft toolchain - no gulp-cli needed; Heft comes
+as a local dependency in the scaffolded project):
 
 ```bash
-npm install -g yo gulp-cli @microsoft/generator-sharepoint
+npm install -g yo @microsoft/generator-sharepoint
 ```
 
 ---
 
 ## 1. Scaffold the SPFx web part
 
+Scaffold non-interactively, create a **webpart** component, and **skip the install** for now -
+dependencies and the tsconfig are set in steps 2-3, then installed once at the end of step 3:
+
 ```bash
 mkdir spfx-site-structure-explorer && cd spfx-site-structure-explorer
 mkdir app && cd app
-yo @microsoft/sharepoint
+yo @microsoft/sharepoint --skip-install \
+  --solution-name site-structure-explorer \
+  --component-type webpart \
+  --component-name SiteStructureExplorer \
+  --component-description "Governance lens over a SharePoint site" \
+  --framework react \
+  --environment spo
 ```
 
-Answer the prompts:
-
-- Solution name: `site-structure-explorer`
-- Component to create: `WebPart`
-- Web part name: `SiteStructureExplorer`
-- Framework: `React`
-- (Target is SharePoint Online only.)
-
-Trust the dev cert (first machine only) and confirm it runs:
-
-```bash
-gulp trust-dev-cert
-gulp serve --nobrowser
-# open https://<tenant>.sharepoint.com/_layouts/15/workbench.aspx, add the web part
-```
-
-You should see the default web part render. Stop `gulp serve` (Ctrl+C) before continuing.
+If the command stalls, it is waiting on an unflagged prompt (e.g. tenant-wide deploy) - answer
+it; do not leave it hanging. When it finishes, open `app/package.json` and note the actual SPFx
+and React versions. The **React** version is the one that matters: KendoReact must match it
+(step 3). SPFx 1.22 scaffolds a Heft project (no gulp).
 
 ---
 
 ## 2. Add PnPjs and wire it to the SPFx context
 
-```bash
-npm install @pnp/sp @pnp/core @pnp/queryable @pnp/logging
+Add these PnPjs packages (installed once at the end of step 3, not now):
+
+```
+@pnp/sp  @pnp/core  @pnp/queryable  @pnp/logging
 ```
 
 In the web part class, create one `sp` instance from the SPFx context and pass it into the
@@ -104,9 +103,57 @@ Import the theme once (e.g. at the top of the web part or root component):
 import "@progress/kendo-theme-default/dist/all.css";
 ```
 
-Gotchas: SPFx ships its own React (17 for 1.22) - do not add a second React. If the theme CSS
-does not load, confirm SPFx is bundling the imported `.css` (import it from a `.ts/.tsx`, not
-only SCSS).
+Gotchas: SPFx ships its own React (17 for 1.22) - do not add a second React. Install a
+KendoReact version whose `peerDependencies` include that React (do not assume the latest Kendo
+supports React 17). If the theme CSS does not load, confirm SPFx is bundling the imported
+`.css` (import it from a `.ts/.tsx`, not only SCSS).
+
+### Single-copy tsconfig, then install once and build the empty shell
+
+Before the first PnPjs build, replace the generated `tsconfig.json` so `@pnp/*` resolves to a
+single copy (otherwise PnPjs v4 augmentation breaks - `.lists` / `.folders` / `.roleAssignments`
+come back undefined):
+
+```jsonc
+{
+  "extends": "./node_modules/@microsoft/spfx-web-build-rig/profiles/default/tsconfig-base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "jsx": "react",
+    "declaration": true,
+    "sourceMap": true,
+    "experimentalDecorators": true,
+    "strictNullChecks": true,
+    "skipLibCheck": true,
+    "outDir": "lib",
+    "noImplicitAny": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@pnp/sp": ["./node_modules/@pnp/sp"],
+      "@pnp/sp/*": ["./node_modules/@pnp/sp/*"],
+      "@pnp/core": ["./node_modules/@pnp/core"],
+      "@pnp/core/*": ["./node_modules/@pnp/core/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}
+```
+
+Now install everything once and confirm the empty shell builds before writing any logic:
+
+```bash
+npm install
+heft build              # build + bundle (combined in Heft); must be clean
+heft trust-dev-cert     # first machine only
+heft start              # serve; open /_layouts/15/workbench.aspx and add the web part
+```
+
+(`heft` runs via the project's npm scripts - `npm run build`, `npm run start` - or `npx heft <task>`.)
 
 ---
 
@@ -272,11 +319,11 @@ Never pre-walk the whole site - fetch children only when a node is expanded.
 ## 9. Run, package, deploy
 
 ```bash
-gulp serve --nobrowser
+heft start
 # test in the hosted workbench: /_layouts/15/workbench.aspx
 
-gulp bundle --ship
-gulp package-solution --ship
+heft build --production            # build + bundle for release
+heft package-solution --production # produces the .sppkg
 # upload sharepoint/solution/*.sppkg to the tenant App Catalog, then add the web part to a page
 ```
 

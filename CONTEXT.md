@@ -6,6 +6,12 @@ only. This blueprint accompanies the AI Skills Fest 2026 talk and is referenced 
 and TUTORIAL - it is the artifact that lets an AI agent scaffold the project fast and stay
 inside the guardrails.
 
+Scope note: this is a standalone, public, single-purpose demo. Build toolchain is Heft - SPFx
+1.22 replaced the gulp toolchain with Heft (webpack still underneath), so the standard
+Heft-only / no-gulp convention applies here; do NOT introduce gulp. Product-specific rules meant
+for other repositories (e.g. a license-cache layer) do NOT apply. This file is the authority;
+where it conflicts with global conventions, this file wins.
+
 ---
 
 ## 1. Purpose and framing
@@ -45,19 +51,34 @@ In scope (stretch, demo only if stable; otherwise pre-recorded):
 
 ## 4. Stack and constraints
 
-- SPFx 1.22, React 17, TypeScript strict, Node 22.
-- Build: standard SPFx toolchain (gulp). The optional seed in section 5 uses Heft; either is
-  fine - keep one consistent toolchain across the solution.
+- Target: SPFx 1.22 / React 17 / TypeScript strict / Node 22. These are the intended pins, but
+  DO NOT assume the local toolchain matches - verify (see VERSION DRIFT below).
+- Node: use Node 22 (with fnm: `fnm use 22`). Confirm `node --version` is 22.x before scaffolding.
+- Build: Heft. SPFx 1.22 replaced the gulp toolchain with Heft (RushStack; webpack still
+  underneath) - there is no gulp. Commands run via `heft` / npm scripts:
+  `heft start` (serve + hosted workbench), `heft build` (build AND bundle combined),
+  `heft build --production` then `heft package-solution --production` (ship + `.sppkg`),
+  `heft clean`. Note: `--ship` is gone (now `--production`); there is no separate `bundle` step.
+- VERSION DRIFT (resolve before writing any logic): the installed
+  `@microsoft/generator-sharepoint` may not be 1.22 (e.g. 1.23.x). The pin that actually matters
+  is the REACT version the generator emits, not the SPFx number. After scaffolding (section 12
+  step 1), read the generated `app/package.json` and record the real SPFx + React versions. If
+  React is not 17, note the deviation as an assumption (section 13); if it cannot be reconciled
+  with KendoReact (below), STOP and surface the conflict to the user - never force a React
+  mismatch across the build.
 - Data: PnPjs 4.x, selective imports only.
 - UI: KendoReact (licensed). Packages: `@progress/kendo-react-treelist`,
   `@progress/kendo-react-dialog`, `@progress/kendo-react-inputs` (Switch),
   `@progress/kendo-react-indicators` or `@progress/kendo-react-common` for badges as needed,
   plus a theme package, e.g. `@progress/kendo-theme-default`. Use one theme consistently.
+- KendoReact MUST match React: install a KendoReact version whose `peerDependencies` include the
+  project's ACTUAL React version. Check the peer range BEFORE `npm install`; do not assume the
+  latest KendoReact supports React 17. If no compatible Kendo line exists for the emitted React,
+  stop and ask (per VERSION DRIFT).
 - KendoReact license: commercial library; activate your own license (trial or paid) via
   `@progress/kendo-licensing` (license file or env var). Do NOT commit the key. See the README.
 - Keep utilities small and local; this demo has no external shared-library dependency.
-- `overrides` block in package.json and `tsconfig.json` path mappings so `@pnp/*` and
-  `@microsoft/*` each resolve to a single copy.
+- Single-copy module resolution for `@pnp/*` + `@microsoft/*` is MANDATORY - see section 10.
 
 ## 5. Seed project (recommended starting point)
 
@@ -273,9 +294,46 @@ inline error state, never a blank component.
 
 ## 10. Build / config specifics
 
-- One consistent SPFx build toolchain (standard gulp tasks, or Heft if seeding from 4-Tree).
-- `tsconfig.json`: path mappings so `@pnp/*` and `@microsoft/*` resolve to one copy.
-- package.json `overrides` block to dedupe `@pnp/*` / `@microsoft/*`.
+- Toolchain: Heft (SPFx 1.22). The 1.22 generator scaffolds a Heft project by default - no gulp.
+- MANDATORY single-copy resolution for `@pnp/*` (the #1 trap). PnPjs v4 selective-import
+  augmentation breaks if more than one copy of `@pnp/sp` is resolved: `.lists`, `.folders`,
+  `.roleAssignments` come back undefined or "property does not exist on type". Fix it by
+  REPLACING the generated `tsconfig.json` with one that extends the Heft web-build-rig base and
+  pins `@pnp/*` to the app's single copy via `paths`:
+
+  ```jsonc
+  {
+    "extends": "./node_modules/@microsoft/spfx-web-build-rig/profiles/default/tsconfig-base.json",
+    "compilerOptions": {
+      "target": "ES2022",
+      "lib": ["ES2022", "DOM"],
+      "module": "ESNext",
+      "moduleResolution": "node",
+      "jsx": "react",
+      "declaration": true,
+      "sourceMap": true,
+      "experimentalDecorators": true,
+      "strictNullChecks": true,
+      "skipLibCheck": true,
+      "outDir": "lib",
+      "noImplicitAny": true,
+      "forceConsistentCasingInFileNames": true,
+      "resolveJsonModule": true,
+      "baseUrl": ".",
+      "paths": {
+        "@pnp/sp": ["./node_modules/@pnp/sp"],
+        "@pnp/sp/*": ["./node_modules/@pnp/sp/*"],
+        "@pnp/core": ["./node_modules/@pnp/core"],
+        "@pnp/core/*": ["./node_modules/@pnp/core/*"]
+      }
+    },
+    "include": ["src/**/*.ts", "src/**/*.tsx"]
+  }
+  ```
+
+  If duplicate `@pnp/*` copies still appear after install, add a package.json `overrides` block
+  pinning `@pnp/*` to one version. Verify a trivial `sp.web()` plus one augmented call
+  (`sp.web.lists`) type-checks and resolves before building the service.
 - KendoReact theme: import one theme (e.g. `@progress/kendo-theme-default`); do not mix themes.
 - KendoReact license activation wired into the build (env/license file); never commit secrets.
 - Web part property: target site is the current site by default; optionally expose a
@@ -283,35 +341,59 @@ inline error state, never a blank component.
 
 ## 11. Definition of done (acceptance criteria)
 
-A code review and a manual workbench run must confirm ALL of:
-1. Renders on a modern SPO page / hosted workbench against the configured site.
-2. Lists + libraries load via a SINGLE `sp.web.lists` call; item counts come from `ItemCount`
+Two buckets. The agent must get the first bucket green, and must NOT claim the second as done -
+it has no tenant auth or license key headless. It hands those off to the user explicitly.
+
+Agent-verifiable (all must be green before handoff):
+1. `heft build` is clean; `heft build --production` then `heft package-solution --production`
+   are clean (Heft combines build + bundle; there is no `gulp` and no separate bundle step).
+2. eslint clean; strict TS clean - no `any`, no `@ts-ignore`, no `!` used to silence the compiler.
+3. Lists + libraries load via a SINGLE `sp.web.lists` call; counts come from `ItemCount`
    (no per-item enumeration anywhere in the code).
-3. "Show hidden and system" toggle works; default state hides them.
-4. Folder expand lazy-loads only the expanded node; no upfront recursion exists in code.
-5. Unique-permissions shown as a boolean; permission detail fetched only on demand for the
+4. No Microsoft Graph anywhere; SPO REST via PnPjs on the delegated SPFx context only.
+5. Folder expand lazy-loads only the expanded node; no upfront recursion exists in code.
+6. Unique-permissions is a boolean column; permission detail is fetched only on demand for the
    selected node; the current-user-visibility caveat is rendered in the dialog.
-6. No Microsoft Graph calls; SPO REST via PnPjs on the SPFx delegated context only.
-7. Strict TS clean: no `any`, no `@ts-ignore`, no `!` used to silence the compiler.
-8. eslint clean; review confirms overrides / tsconfig pins, no direct Graph, no dead code.
+7. "Show hidden and system" toggle works; default hides them.
+8. `KNOWN_SYSTEM_TEMPLATES` present; review confirms overrides / tsconfig pins, no dead code.
 9. Throttling-safe: PnPjs retry enabled; graceful error and empty states; never a blank UI.
+
+Human-verifiable (agent hands off, states plainly, does NOT mark done):
+- Renders in the hosted workbench against a real site (needs the user's tenant auth). To run
+  locally: `heft trust-dev-cert` once, then `heft start`, then open the hosted workbench.
+- KendoReact renders without a trial banner (needs an activated license key).
+- Permission detail reflects what the signed-in user is allowed to see.
 
 ## 12. Implementation order for Claude Code
 
-1. Start from the seed (section 5): copy `4-Tree/app`, rename the web part to
-   `siteStructureExplorer`, strip CRUD/lookup/cache down to read-only, then swap Fluent UI
-   for KendoReact (add packages + theme + license activation). Confirm it renders an empty
-   shell in the workbench before adding logic.
-2. Write the models (section 7) - the typed contract first.
-3. Implement `getSiteRoot` + `getListsAndLibraries`; render a plain TreeList with the columns
-   bound to real data. This is the MVP; verify live-safe behavior here.
-4. Add the "Show hidden and system" Switch + client-side filtering.
-5. Add lazy folder expand (`getChildFolders` + `onExpandChange`).
-6. Add `PermissionDetailDialog` (`getPermissions` on open) with the visibility caveat.
-7. Polish loading/empty/error states. Run eslint and review; fix to green.
+0. Confirm Node 22 (`node --version`; `fnm use 22` if needed).
+1. Scaffold into `app/`, non-interactively and WITHOUT install yet. Run from inside `app/`:
+   `yo @microsoft/sharepoint --skip-install --solution-name site-structure-explorer
+   --component-type webpart --component-name SiteStructureExplorer
+   --component-description "Governance lens over a SharePoint site" --framework react
+   --environment spo`
+   If the command stalls, it is waiting on an UNFLAGGED stdin prompt (e.g. tenant-wide deploy) -
+   answer it; never leave it hanging.
+   The 4-Tree seed (section 5) is OPTIONAL; a fresh scaffold is fine and often cleaner here. If
+   you skip the seed, you OWN the section 10 single-copy setup yourself. Record the seed-skip as
+   an assumption (section 13).
+2. Read `app/package.json`: record actual SPFx + React versions. Choose a KendoReact version
+   whose peer range includes that React (section 4). If React is not 17, note it or stop per the
+   VERSION DRIFT rule.
+3. Replace `tsconfig.json` per section 10 (extends the Heft rig base + `@pnp/*` single-copy
+   `paths`) FIRST. Then add the KendoReact packages (React-matched) + one theme + license activation.
+4. `npm install` once. Run `heft build` (`npm run build`) and confirm the EMPTY shell compiles
+   before writing any logic. This gate is mandatory - do not proceed on a non-compiling shell.
+5. Write the typed models (section 7) - the contract first.
+6. Implement `getSiteRoot` + `getListsAndLibraries`; bind a plain TreeList. This is the
+   live-safe MVP.
+7. Add the "Show hidden and system" Switch + client-side filtering.
+8. Add lazy folder expand (`getChildFolders` + `onExpandChange`).
+9. Add `PermissionDetailDialog` (`getPermissions` on open) with the visibility caveat.
+10. Polish loading/empty/error states. Get eslint + `heft build` green.
 
 Commit after each step. Keep each step independently runnable so the demo can stop at the
-MVP (step 3-4) if needed.
+MVP (step 6). Hand off the live-workbench and license checks to the user (section 11).
 
 ## 13. Decided parameters (CC: do NOT ask - use these)
 

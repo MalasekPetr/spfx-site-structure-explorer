@@ -29,7 +29,8 @@ inheritance. Same standard data, new lens.
 
 ## Tech stack
 
-- SharePoint Framework (SPFx) 1.22, web part, React 17, TypeScript (strict).
+- SharePoint Framework (SPFx) 1.22, web part, React 17, TypeScript (strict). SPFx 1.22 uses the
+  Heft build toolchain (gulp was removed; webpack still underneath).
 - [PnPjs](https://pnp.github.io/pnpjs/) 4.x for SharePoint REST (delegated SPFx context).
 - [KendoReact](https://www.telerik.com/kendo-react-ui) for the UI (TreeList, Dialog, Switch).
 - No Microsoft Graph: all data comes from SPO REST via PnPjs on the current user's context.
@@ -77,8 +78,8 @@ npm install
 # Activate your KendoReact license (see Telerik docs; do NOT commit the key)
 # e.g. place your license file in the project root, then run the activation script.
 
-gulp trust-dev-cert        # first time only
-gulp serve --nobrowser
+heft trust-dev-cert        # first time only
+heft start
 ```
 
 Then open the hosted workbench and add the web part:
@@ -93,8 +94,8 @@ point it at another site in the same tenant (read access required).
 ## Deploy
 
 ```bash
-gulp bundle --ship
-gulp package-solution --ship
+heft build --production            # build + bundle for release
+heft package-solution --production # produces the .sppkg
 # upload sharepoint/solution/*.sppkg to your tenant App Catalog
 ```
 
